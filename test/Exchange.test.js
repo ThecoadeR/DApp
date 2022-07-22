@@ -57,7 +57,7 @@ contract('Exchange', ([deployer, feeAccount, user1]) => {
     let amount
 
     beforeEach(async () => {
-      amount = ether(10)
+      amount = ether(1)
       res = await exchange.depositETH({ from: deployer, value: amount })
     })
 
@@ -75,6 +75,43 @@ contract('Exchange', ([deployer, feeAccount, user1]) => {
         event.user.should.equal(deployer)
         event.amount.toString().should.equal(amount.toString())
         event.balance.toString().should.equal(amount.toString())
+      })
+    })
+  })
+
+  describe('withdrawETH', () => {
+    let res
+    let amount
+
+    beforeEach(async () => {
+      amount = ether(1)
+      await exchange.depositETH({ from: user1, value: amount })
+    })
+
+    describe('success', () => {
+      beforeEach(async () => {
+        res = await exchange.withdrawETH(amount, { from: user1 })
+      })
+
+      it('after withdrawETH', async () => {
+        const balance = await exchange.tokens(ETH_ADDRESS, user1)
+        balance.toString().should.equal('0')
+      })
+
+      it ('emit withdrawETH event', async() => {
+        const log = res.logs[0]
+        log.event.should.eq('WithdrawETH')
+        const event = log.args
+        event.token.should.equal(ETH_ADDRESS)
+        event.user.should.equal(user1)
+        event.amount.toString().should.equal(amount.toString())
+        event.balance.toString().should.equal('0')
+      })
+    })
+
+    describe('fail', () => {
+      it('not enough balance', async () => {
+        await exchange.withdrawETH(ether(100), { from: user1 }).should.be.rejectedWith(VM_WARNING)
       })
     })
   })
@@ -121,6 +158,58 @@ contract('Exchange', ([deployer, feeAccount, user1]) => {
       it('fails when ETH deposit', async () => {
         await exchange.depositToken(ETH_ADDRESS, tokens(10), { from: user1 }).should.be.rejectedWith(VM_WARNING)
       })
+    })
+  })
+
+  describe('withdraw token', () => {
+    let amount
+    let res
+
+    beforeEach(async () => {
+      amount = tokens(10)
+      // 开始交易前先批准可交易的金额
+      await token.approve(exchange.address, amount, { from: user1 })
+      // 存款到交易所
+      await exchange.depositToken(token.address, amount, { from: user1 })
+      // 用户取款
+      res = await exchange.withdrawToken(token.address, amount, { from: user1 })
+    })
+
+    describe('success', () => {
+      it('success', async () => {
+        const balance = await exchange.tokens(token.address, user1)
+        balance.toString().should.equal('0')
+      })
+  
+      it ('emit withdrawToken event', async() => {
+        const log = res.logs[0]
+        log.event.should.eq('WithdrawToken')
+        const event = log.args
+        event.token.should.equal(token.address)
+        event.user.should.equal(user1)
+        event.amount.toString().should.equal(amount.toString())
+        event.balance.toString().should.equal('0')
+      })
+    })
+    
+    describe('fail', () => {
+      it('try to withdraw eth', async () => {
+        await exchange.withdrawToken(ETH_ADDRESS, tokens(100), { from: user1 }).should.be.rejectedWith(VM_WARNING)
+      })
+      it('not enough balance', async () => {
+        await exchange.withdrawToken(token.address, tokens(100), { from: user1 }).should.be.rejectedWith(VM_WARNING)
+      })
+    })
+  })
+
+  describe('check balance', () => {
+    beforeEach(async () => {
+      exchange.depositETH({ from: user1, value: ether(1) })
+    })
+
+    it('success', async () => {
+      const res = await exchange.balanceOf(ETH_ADDRESS, user1)
+      res.toString().should.equal(ether(1).toString())
     })
   })
 })
