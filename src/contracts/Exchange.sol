@@ -13,11 +13,43 @@ contract Exchange {
   mapping(address => mapping(address => uint256)) public tokens; // 用户余额
   // ETH
   address constant ETHER = address(0); // 由于ETH没有具体地址 所以当地址为空的时候 默认为ETH
+  mapping(uint256 => _Order) public orders; // 由于无法直接获取所有订单，只能通过订单号(orderCount)来获取对应订单信息或者emit event
+  uint256 public orderCount; // 订单计数器 用来缓存订单ID
+  mapping(uint256 => bool) public orderCancelled; // 存储所有被取消的订单
 
   // event
   event Deposit(address token, address user, uint256 amount, uint256 balance);
   event WithdrawETH(address token, address user, uint256 amount, uint256 balance);
   event WithdrawToken(address token, address user, uint256 amount, uint256 balance);
+  event Order(
+    uint256 id,
+    address user,
+    address tokenGet,
+    uint256 amountGet,
+    address tokenGive,
+    uint256 amountGive,
+    uint256 timestamp
+  );
+  event OrderCancel(
+    uint256 id,
+    address user,
+    address tokenGet,
+    uint256 amountGet,
+    address tokenGive,
+    uint256 amountGive,
+    uint256 timestamp
+  );
+
+  // 订单模型
+  struct _Order {
+    uint256 id;
+    address user;
+    address tokenGet; // 购买的token地址
+    uint256 amountGet; // 购买的token数量
+    address tokenGive; // 用哪种token进行交易
+    uint256 amountGive; // 交易的数量
+    uint256 timestamp; // 时间戳
+  }
 
   constructor(address _feeAccount, uint256 _feePercent) public {
     feeAccount = _feeAccount;
@@ -83,5 +115,27 @@ contract Exchange {
     */
   function balanceOf(address _token, address _user) public view returns(uint) {
     return tokens[_token][_user];
+  }
+
+  /**
+    创建订单
+   */
+  function makeOrder(address _tokenGet, uint256 _amountGet, address _tokenGive, uint256 _amountGive) public {
+    orderCount = orderCount.add(1);
+    orders[orderCount] = _Order(orderCount, msg.sender, _tokenGet, _amountGet, _tokenGive, _amountGive, now);
+    emit Order(orderCount, msg.sender, _tokenGet, _amountGet, _tokenGive, _amountGive, now);
+  }
+
+  /**
+    取消订单
+   */
+  function cancelOrder(uint256 _id) public {
+    // 获取订单
+    _Order storage _order = orders[_id];
+    require(address(_order.user) == msg.sender);
+    require(_order.id == _id);
+    // true === cancel
+    orderCancelled[_id] = true;
+    emit OrderCancel(_order.id, msg.sender, _order.tokenGet, _order.amountGet, _order.tokenGive, _order.amountGive, now);
   }
 }

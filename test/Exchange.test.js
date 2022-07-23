@@ -212,4 +212,89 @@ contract('Exchange', ([deployer, feeAccount, user1]) => {
       res.toString().should.equal(ether(1).toString())
     })
   })
+
+  describe('make order', () => {
+    let res
+
+    beforeEach(async () => {
+      res = await exchange.makeOrder(token.address, tokens(1), ETH_ADDRESS, ether(1), { from: user1 })
+    })
+
+    it('tracks the order count', async () => {
+      const orderId = await exchange.orderCount();
+      orderId.toString().should.be.equal('1')
+      const order = await exchange.orders('1')
+      // console.log(order)
+      order.id.toString().should.equal('1')
+      order.user.should.equal(user1)
+      order.tokenGet.should.equal(token.address)
+      order.amountGet.toString().should.equal(tokens(1).toString())
+      order.tokenGive.should.equal(ETH_ADDRESS)
+      order.amountGive.toString().should.equal(ether(1).toString())
+      order.timestamp.toString().length.should.be.at.least(1)
+    })
+
+    it('emit make order event', async () => {
+      const log = res.logs[0]
+      log.event.should.eq('Order')
+      const event = log.args
+      event.id.toString().should.equal('1')
+      event.user.should.equal(user1)
+      event.tokenGet.should.equal(token.address)
+      event.amountGet.toString().should.equal(tokens(1).toString())
+      event.tokenGive.should.equal(ETH_ADDRESS)
+      event.amountGive.toString().should.equal(ether(1).toString())
+      event.timestamp.toString().length.should.be.at.least(1)
+    })
+  })
+
+  describe('order action', () => {
+    let res
+    beforeEach(async () => {
+      // 用户先充值1ETH
+      await exchange.depositETH({ from: user1, value: ether(1) })
+      // 用户用ETH来购买Z Token
+      await exchange.makeOrder(token.address, tokens(1), ETH_ADDRESS, ether(1), { from: user1 })
+    })
+
+    describe('cancel order', () => {
+      let res
+      describe('success', () => {
+
+        beforeEach(async () => {
+          res = await exchange.cancelOrder('1', { from: user1 })
+        })
+
+        it('order has been canceled', async () => {
+          const isCanceled = await exchange.orderCancelled(1)
+          isCanceled.should.equal(true)
+        })
+
+        it('emit order cancel event', async () => {
+          const log = res.logs[0]
+          log.event.should.eq('OrderCancel')
+          const event = log.args
+          event.id.toString().should.equal('1')
+          event.user.should.equal(user1)
+          event.tokenGet.should.equal(token.address)
+          event.amountGet.toString().should.equal(tokens(1).toString())
+          event.tokenGive.should.equal(ETH_ADDRESS)
+          event.amountGive.toString().should.equal(ether(1).toString())
+          event.timestamp.toString().length.should.be.at.least(1)
+        })
+      })
+
+      describe('fail', () => {
+
+        it('reject invalid order is', async () => {
+          const orderId = 9999
+          await exchange.cancelOrder(orderId, { from: user1 }).should.be.rejectedWith(VM_WARNING)
+        })
+
+        it('reject unauthorized order', async () => {
+          await exchange.cancelOrder('1', { from: deployer }).should.be.rejectedWith(VM_WARNING)
+        })
+      })
+    })
+  })
 })
