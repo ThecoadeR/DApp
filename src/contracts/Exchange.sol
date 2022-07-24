@@ -16,6 +16,7 @@ contract Exchange {
   mapping(uint256 => _Order) public orders; // 由于无法直接获取所有订单，只能通过订单号(orderCount)来获取对应订单信息或者emit event
   uint256 public orderCount; // 订单计数器 用来缓存订单ID
   mapping(uint256 => bool) public orderCancelled; // 存储所有被取消的订单
+  mapping(uint256 => bool) public orderFilled; // 存储所有成交的订单
 
   // event
   event Deposit(address token, address user, uint256 amount, uint256 balance);
@@ -37,6 +38,16 @@ contract Exchange {
     uint256 amountGet,
     address tokenGive,
     uint256 amountGive,
+    uint256 timestamp
+  );
+  event Trade(
+    uint256 id,
+    address user,
+    address tokenGet,
+    uint256 amountGet,
+    address tokenGive,
+    uint256 amountGive,
+    address userFill,
     uint256 timestamp
   );
 
@@ -137,5 +148,41 @@ contract Exchange {
     // true === cancel
     orderCancelled[_id] = true;
     emit OrderCancel(_order.id, msg.sender, _order.tokenGet, _order.amountGet, _order.tokenGive, _order.amountGive, now);
+  }
+
+  /**
+    成交订单
+    1. 获取订单
+    2. 执行交易
+    3. 收取手续费
+    4. 发出成交事件
+    5. 修改订单状态为已成交
+   */
+  function fillOrder(uint256 _id) public {
+    require(!orderFilled[_id]);
+    require(!orderCancelled[_id]);
+    require(_id > 0 && _id <= orderCount);
+    // 获取订单
+    _Order storage _order = orders[_id];
+    _trade(_order.id, _order.user, _order.tokenGet, _order.amountGet, _order.tokenGive, _order.amountGive);
+    orderFilled[_order.id] = true;
+  }
+
+  /** 
+    交易的核心逻辑
+    1. 用户增加买入的代币的余额 && 减少购买代币所付出对应代币余额
+    2. 出售者增加用户所付出的代币余额 && 减少用户购买对应代币的余额
+  */
+  function _trade(uint256 _id, address _user, address _tokenGet, uint256 _amountGet, address _tokenGive, uint256 _amountGive) internal {
+    // 手续费(由填写订单的人承担) *手续费的比例 / 100
+    uint256 _feeAmount = _amountGive.mul(feePercent).div(100);
+
+    tokens[_tokenGet][msg.sender] = tokens[_tokenGet][msg.sender].sub(_amountGet.add(_feeAmount));
+    tokens[_tokenGet][_user] = tokens[_tokenGet][_user].add(_amountGet);
+    tokens[_tokenGive][msg.sender] = tokens[_tokenGive][msg.sender].add(_amountGive);
+    tokens[_tokenGive][_user] = tokens[_tokenGive][_user].sub(_amountGive);
+    // 更新手续费账户余额
+    tokens[_tokenGet][feeAccount] = tokens[_tokenGet][feeAccount].add(_feeAmount);
+    emit Trade(_id, _user, _tokenGet, _amountGet, _tokenGive, _amountGive, msg.sender, now);
   }
 }

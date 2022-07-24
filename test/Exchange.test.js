@@ -18,7 +18,7 @@ const VM_WARNING = 'VM Exception while processing transaction: revert'
 // ETH代币地址
 const ETH_ADDRESS = '0x0000000000000000000000000000000000000000'
 
-contract('Exchange', ([deployer, feeAccount, user1]) => {
+contract('Exchange', ([deployer, feeAccount, user1, user2]) => {
   
   let token
   let exchange
@@ -249,12 +249,77 @@ contract('Exchange', ([deployer, feeAccount, user1]) => {
   })
 
   describe('order action', () => {
-    let res
     beforeEach(async () => {
-      // 用户先充值1ETH
+      // 用户1先充值1ETH
       await exchange.depositETH({ from: user1, value: ether(1) })
-      // 用户用ETH来购买Z Token
+      // 转移至100个Z token给user2 他将作为卖方
+      await token.transfer(user2, tokens(100), { from: deployer })
+      // 批准交易所交易20个 Z token
+      await token.approve(exchange.address, tokens(2), { from: user2 })
+      // 用户2 在当前交易所充值了20个 Z token
+      await exchange.depositToken(token.address, tokens(2), { from: user2 })
+      // 用户1用ETH来购买1个Z Token
       await exchange.makeOrder(token.address, tokens(1), ETH_ADDRESS, ether(1), { from: user1 })
+
+    })
+
+    describe('filling orders', () => {
+      let res
+      describe('success', () => {
+        beforeEach(async () => {
+          res = await exchange.fillOrder('1', { from: user2 })
+        })
+        it ('check the balance after executes the trade', async () => {
+          let balance
+          balance = await exchange.balanceOf(token.address, user1)
+          balance.toString().should.equal(tokens(1).toString(), 'user1 received token')
+          balance = await exchange.balanceOf(ETH_ADDRESS, user2)
+          balance.toString().should.equal(ether(1).toString(), 'user2 received ETH')
+          balance = await exchange.balanceOf(ETH_ADDRESS, user1)
+          balance.toString().should.equal('0', 'user2 after trade')
+          balance = await exchange.balanceOf(token.address, user2)
+          balance.toString().should.equal(tokens(0.9).toString())
+          const feeAccount = await exchange.feeAccount()
+          balance = await exchange.balanceOf(token.address, feeAccount)
+          balance.toString().should.equal(tokens(0.1).toString())
+        })
+
+        it('updates filled orders', async () => {
+          const orderFilled = await exchange.orderFilled(1)
+          orderFilled.should.equal(true)
+        })
+  
+        it('emit a "Trade" event', async () => {
+          const log = res.logs[0]
+          log.event.should.eq('Trade')
+          const event = log.args
+          event.id.toString().should.equal('1')
+          event.user.should.equal(user1)
+          event.tokenGet.should.equal(token.address)
+          event.amountGet.toString().should.equal(tokens(1).toString())
+          event.tokenGive.should.equal(ETH_ADDRESS)
+          event.amountGive.toString().should.equal(ether(1).toString())
+          event.timestamp.toString().length.should.be.at.least(1)
+          event.userFill.should.equal(user2)
+        })
+      })
+
+      
+      describe('fail', () => {
+        it('rejects invalid order id', async () => {
+          const invalidId = 9999
+          await exchange.fillOrder(invalidId, { from: user2 }).should.be.rejectedWith(VM_WARNING)
+        })
+        it('rejects already-filled orders', async () => {
+          // 再次尝试已经成交的订单
+          await exchange.fillOrder('1', { from: user2 }).should.be.fulfilled
+          await exchange.fillOrder('1', { from: user2 }).should.be.rejectedWith(VM_WARNING)
+        })
+        it('rejects cancelled orders', async () => {
+          await exchange.cancelOrder('1', { from: user1 }).should.be.fulfilled
+          await exchange.cancelOrder('1', { from: user2 }).should.be.rejectedWith(VM_WARNING)
+        })
+      })
     })
 
     describe('cancel order', () => {
